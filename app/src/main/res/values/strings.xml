@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="module_name">小布26键上滑</string>
+    <string name="module_description">自定义小布输入法（com.oplus.keyboard）中英文26键上滑字母替换</string>
+</resources>
