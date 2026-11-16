@@ -10,6 +10,14 @@ object Config {
     const val KEY_MAP_CN = "map_cn"
     const val KEY_MAP_EN = "map_en"
 
+    /** 左下角功能键互换：主键盘（符号 ⇄ 123）。 */
+    const val KEY_SWAP_MAIN = "swap_main"
+    const val DEFAULT_SWAP_MAIN = true
+
+    /** 左下角功能键互换：符号 / 数字面板（返回 ⇄ 123、符号 ⇄ 返回）。 */
+    const val KEY_SWAP_PANEL = "swap_panel"
+    const val DEFAULT_SWAP_PANEL = true
+
     /** 键盘字母键顺序（qwerty 三行拼接）。 */
     const val LETTERS = "qwertyuiopasdfghjklzxcvbnm"
 
@@ -67,16 +75,15 @@ object Config {
     }
 
     /**
-     * 导出为对外 JSON（version=2，含 enabled/cn/en/t9 分区）。
+     * 导出为对外 JSON（version=3，含 enabled/cn/en 分区）。
      * 值为 null 的字母不写入（表示默认），空串表示禁用。
      */
     fun exportJson(enabled: Boolean, cn: Map<Char, String?>, en: Map<Char, String?>): String {
         val root = JSONObject()
-        root.put("version", 2)
+        root.put("version", 3)
         root.put("enabled", enabled)
         root.put("cn", sectionToJson(cn))
         root.put("en", sectionToJson(en))
-        root.put("t9", JSONObject())
         return root.toString(2)
     }
 
@@ -86,7 +93,7 @@ object Config {
         val en: Map<Char, String>,
     )
 
-    /** 解析导入 JSON；格式错误返回 null。t9 分区忽略。 */
+    /** 解析导入 JSON；格式错误返回 null。未知分区忽略。 */
     fun parseImport(raw: String): ImportData? {
         if (raw.isBlank()) return null
         return try {
