@@ -40,10 +40,10 @@
 
 如果这个模块对你有帮助，欢迎请作者喝杯奶茶 ₍ᐢ..ᐢ₎♡
 
-<div align="center">
-  <img src="donate/donate_v.png" width="220" alt="赞赏码" />
+<p align="center">
+  <img src="donate/donate_v.png" width="220" alt="赞赏码" />&nbsp;&nbsp;&nbsp;&nbsp;
   <img src="donate/donate_z.png" width="220" alt="赞赏码" />
-</div>
+</p>
 
 ## 许可
 
