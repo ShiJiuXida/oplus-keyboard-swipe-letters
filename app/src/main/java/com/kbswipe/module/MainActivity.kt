@@ -1,15 +1,15 @@
 package com.kbswipe.module
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -25,19 +25,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -51,17 +51,20 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
 import com.itos.coui.layout.CouiPageDefaults
 import com.itos.coui.layout.Group
 import com.itos.coui.layout.Item
 import com.itos.coui.layout.Scaffold
+import com.itos.coui.segmentbutton.SegmentedControl
 import com.itos.coui.switch.Switch
 import com.itos.coui.text.CouiTextKind
 import com.itos.coui.text.Text
 import com.itos.coui.theme.CouiTheme
 import com.itos.coui.topappbar.TopAppBar
 import io.github.libxposed.service.XposedService
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -77,6 +80,8 @@ class MainActivity : ComponentActivity() {
 }
 
 private val KEY_ROWS = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+
+private const val PROJECT_URL = "https://github.com/ShiJiuXida/oplus-keyboard-swipe-letters"
 
 /** 引用过的开源库（二级菜单项）。 */
 private data class ReferenceItem(val name: String, val url: String)
@@ -110,14 +115,14 @@ private fun MainScreen() {
         loaded = true
     }
 
-    var exportText by remember { mutableStateOf<String?>(null) }
-    var importOpen by remember { mutableStateOf(false) }
+    var cnMode by rememberSaveable { mutableStateOf(true) }
     var refsExpanded by remember { mutableStateOf(false) }
 
     val colors = CouiPageDefaults.themeColors()
     val accent = colors.accent
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     fun openUrl(url: String) {
         runCatching {
@@ -142,6 +147,39 @@ private fun MainScreen() {
             Toast.makeText(context, "已保存，输入法将自动重启生效", Toast.LENGTH_SHORT).show()
         }
         focusManager.clearFocus()
+    }
+
+    val exportConfigLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val ok = writeTextToUri(context, uri, Config.exportJson(enabled, cnValues, enValues))
+                Toast.makeText(
+                    context,
+                    if (ok) "配置已导出" else "导出失败",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+        }
+    }
+    val importConfigLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val data = importConfig(context, uri)
+                if (data == null) {
+                    Toast.makeText(context, "导入失败：无法读取或 JSON 格式不正确", Toast.LENGTH_SHORT).show()
+                } else {
+                    enabled = data.enabled
+                    cnValues = data.cn
+                    enValues = data.en
+                    saveConfig(showToast = false)
+                    Toast.makeText(context, "导入成功，输入法将自动重启生效", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     Scaffold(
@@ -223,29 +261,19 @@ private fun MainScreen() {
             }
             Spacer(Modifier.height(16.dp))
 
-            MappingGroup(
-                groupTitle = "中文 26 键（拼音 / 五笔）",
-                values = cnValues,
-                defaults = Config.CN_DEFAULTS,
+            MappingSection(
+                cnMode = cnMode,
+                onModeChange = { cnMode = it },
+                cnValues = cnValues,
+                enValues = enValues,
                 accent = accent,
                 cardColor = colors.card,
                 titleColor = colors.title,
                 hintColor = colors.summary,
-                onValueChange = { letter, value -> cnValues = cnValues + (letter to value) },
-                onRestoreDefaults = { cnValues = emptyMap() },
-            )
-            Spacer(Modifier.height(16.dp))
-
-            MappingGroup(
-                groupTitle = "英文 26 键",
-                values = enValues,
-                defaults = Config.EN_DEFAULTS,
-                accent = accent,
-                cardColor = colors.card,
-                titleColor = colors.title,
-                hintColor = colors.summary,
-                onValueChange = { letter, value -> enValues = enValues + (letter to value) },
-                onRestoreDefaults = { enValues = emptyMap() },
+                onCnChange = { letter, value -> cnValues = cnValues + (letter to value) },
+                onEnChange = { letter, value -> enValues = enValues + (letter to value) },
+                onRestoreCn = { cnValues = emptyMap() },
+                onRestoreEn = { enValues = emptyMap() },
             )
             Spacer(Modifier.height(16.dp))
 
@@ -272,23 +300,43 @@ private fun MainScreen() {
             Group(title = "数据") {
                 Item(
                     onClick = {
-                        exportText = Config.exportJson(enabled, cnValues, enValues)
+                        exportConfigLauncher.launch("小布26键上滑配置.json")
                     },
                 ) {
                     Text(
-                        text = "导出配置",
+                        text = "导出配置到文件",
                         kind = CouiTextKind.ItemTitle,
                         color = colors.title,
                     )
                 }
                 Item(
-                    onClick = { importOpen = true },
+                    onClick = {
+                        importConfigLauncher.launch(
+                            arrayOf("application/json", "text/plain", "application/octet-stream"),
+                        )
+                    },
                 ) {
                     Text(
-                        text = "导入配置",
+                        text = "从文件导入配置",
                         kind = CouiTextKind.ItemTitle,
                         color = colors.title,
                     )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+
+            Group(title = "我的仓库") {
+                Item(
+                    summary = {
+                        Text(
+                            text = "小布输入法 26 键上滑字母替换模块 · 点击打开仓库，欢迎 Star 与反馈问题",
+                            kind = CouiTextKind.ItemSummary,
+                            color = colors.summary,
+                        )
+                    },
+                    onClick = { openUrl(PROJECT_URL) },
+                ) {
+                    Text(text = "项目仓库", kind = CouiTextKind.ItemTitle, color = colors.title)
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -330,7 +378,7 @@ private fun MainScreen() {
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "留空表示禁用该键的上滑输入；点击「恢复默认」恢复全部默认符号。修改保存后输入法进程会重启生效。",
+                text = "留空表示禁用该键的上滑输入；点击「恢复默认」恢复当前中英文模式的默认符号。导出/导入为 JSON 文件，修改保存后输入法进程会重启生效。",
                 kind = CouiTextKind.ItemSummary,
                 color = colors.summary,
                 modifier = Modifier.padding(horizontal = 4.dp),
@@ -338,54 +386,30 @@ private fun MainScreen() {
             Spacer(Modifier.height(24.dp))
         }
     }
-
-    exportText?.let { json ->
-        ExportDialog(
-            json = json,
-            colors = colors,
-            onDismiss = { exportText = null },
-            onCopy = {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(ClipData.newPlainText("小布26键上滑配置", json))
-                Toast.makeText(context, "已复制到剪贴板", Toast.LENGTH_SHORT).show()
-            },
-        )
-    }
-
-    if (importOpen) {
-        ImportDialog(
-            colors = colors,
-            onDismiss = { importOpen = false },
-            onApply = { raw ->
-                val data = Config.parseImport(raw)
-                if (data == null) {
-                    Toast.makeText(context, "导入失败：JSON 格式不正确", Toast.LENGTH_SHORT).show()
-                } else {
-                    enabled = data.enabled
-                    cnValues = data.cn
-                    enValues = data.en
-                    importOpen = false
-                    saveConfig()
-                }
-            },
-        )
-    }
 }
 
 @Composable
-private fun MappingGroup(
-    groupTitle: String,
-    values: Map<Char, String?>,
-    defaults: List<String>,
+private fun MappingSection(
+    cnMode: Boolean,
+    onModeChange: (Boolean) -> Unit,
+    cnValues: Map<Char, String?>,
+    enValues: Map<Char, String?>,
     accent: Color,
     cardColor: Color,
     titleColor: Color,
     hintColor: Color,
-    onValueChange: (Char, String?) -> Unit,
-    onRestoreDefaults: () -> Unit,
+    onCnChange: (Char, String?) -> Unit,
+    onEnChange: (Char, String?) -> Unit,
+    onRestoreCn: () -> Unit,
+    onRestoreEn: () -> Unit,
 ) {
+    val values = if (cnMode) cnValues else enValues
+    val defaults = if (cnMode) Config.CN_DEFAULTS else Config.EN_DEFAULTS
+    val onValueChange = if (cnMode) onCnChange else onEnChange
+    val onRestoreDefaults = if (cnMode) onRestoreCn else onRestoreEn
+
     Group(
-        title = groupTitle,
+        title = "26键上滑字母",
         headerActions = {
             Text(
                 text = "恢复默认",
@@ -404,6 +428,13 @@ private fun MappingGroup(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 12.dp),
         ) {
+            SegmentedControl(
+                modifier = Modifier.fillMaxWidth(),
+                labels = listOf("中文26键", "英文26键"),
+                selectedIndex = if (cnMode) 0 else 1,
+                onSelected = { onModeChange(it == 0) },
+            )
+            Spacer(Modifier.height(12.dp))
             for (row in KEY_ROWS) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -494,126 +525,29 @@ private fun KeyCell(
     }
 }
 
-@Composable
-private fun ExportDialog(
-    json: String,
-    colors: com.itos.coui.layout.CouiPageColors,
-    onDismiss: () -> Unit,
-    onCopy: () -> Unit,
-) {
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
-                .background(colors.card)
-                .padding(20.dp),
-        ) {
-            Text(text = "导出配置", kind = CouiTextKind.ItemTitle, color = colors.title)
-            Spacer(Modifier.height(12.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 320.dp)
-                    .verticalScroll(rememberScrollState())
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(colors.background)
-                    .padding(12.dp),
-            ) {
-                SelectionContainer {
-                    Text(
-                        text = json,
-                        kind = CouiTextKind.ItemSummary,
-                        color = colors.title,
-                    )
-                }
-            }
-            Spacer(Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                DialogAction(text = "取消", color = colors.summary, onClick = onDismiss)
-                Spacer(Modifier.width(12.dp))
-                DialogAction(text = "复制", color = colors.accent, onClick = onCopy)
-            }
+/* ---------------- 文件读写 ---------------- */
+
+private suspend fun writeTextToUri(context: Context, uri: Uri, content: String): Boolean =
+    withContext(Dispatchers.IO) {
+        try {
+            context.contentResolver.openOutputStream(uri)?.use { stream ->
+                stream.write(content.toByteArray(Charsets.UTF_8))
+            } ?: return@withContext false
+            true
+        } catch (t: Throwable) {
+            false
         }
     }
-}
 
-@Composable
-private fun ImportDialog(
-    colors: com.itos.coui.layout.CouiPageColors,
-    onDismiss: () -> Unit,
-    onApply: (String) -> Unit,
-) {
-    var text by remember { mutableStateOf("") }
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
-                .background(colors.card)
-                .padding(20.dp),
-        ) {
-            Text(text = "导入配置", kind = CouiTextKind.ItemTitle, color = colors.title)
-            Spacer(Modifier.height(12.dp))
-            BasicTextField(
-                value = text,
-                onValueChange = { text = it },
-                textStyle = TextStyle(
-                    color = colors.title,
-                    fontSize = 13.sp,
-                ),
-                cursorBrush = SolidColor(colors.accent),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 120.dp, max = 280.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(colors.background)
-                    .padding(12.dp)
-                    .verticalScroll(rememberScrollState()),
-                decorationBox = { inner ->
-                    if (text.isEmpty()) {
-                        Text(
-                            text = "在此粘贴 JSON 配置文本",
-                            kind = CouiTextKind.ItemSummary,
-                            color = colors.summary.copy(alpha = 0.6f),
-                        )
-                    }
-                    inner()
-                },
-            )
-            Spacer(Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-            ) {
-                DialogAction(text = "取消", color = colors.summary, onClick = onDismiss)
-                Spacer(Modifier.width(12.dp))
-                DialogAction(text = "应用", color = colors.accent, onClick = { onApply(text) })
+private suspend fun importConfig(context: Context, uri: Uri): Config.ImportData? {
+    val raw = withContext(Dispatchers.IO) {
+        try {
+            context.contentResolver.openInputStream(uri)?.use { stream ->
+                stream.readBytes().decodeToString()
             }
+        } catch (t: Throwable) {
+            null
         }
     }
-}
-
-@Composable
-private fun DialogAction(
-    text: String,
-    color: Color,
-    onClick: () -> Unit,
-) {
-    Box(
-        modifier = Modifier
-            .height(36.dp)
-            .padding(horizontal = 12.dp)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = onClick,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(text = text, kind = CouiTextKind.ItemTitle, color = color)
-    }
+    return raw?.let { Config.parseImport(it) }
 }
