@@ -1,22 +1,22 @@
 # 由 githup App 生成（Android Gradle）· 2026-11-16
-# 修改说明：修复构建失败——补装 Android SDK、Gradle 分发源换官方（华为云镜像海外不可达）、
-#           versionCode 默认值改为整数、未配置签名密钥时跳过签名（构建仍成功）。
+# 修改说明：构建 debug APK 并打包 zip（zip 内直接放 APK，不嵌套目录）；
+#          补装 Android SDK、Gradle 分发源换官方（华为云镜像海外不可达）、versionCode 默认值为整数。
 # 每个步骤都带注释，可直接修改；改完请在上方填写修改说明再保存。
 
-name: Build APK
+name: Build Debug APK
 
 on:
   workflow_dispatch:   # 允许在 App 里点「手动触发构建」
     inputs:
       app_name:
         description: 安装包名称
-        default: '小布输入法修改上滑符号'
+        default: '小布26键上滑字母'
       version_name:
         description: 版本号（versionName）
-        default: '1.4'
+        default: '1.5'
       version_code:
         description: 版本代号（versionCode，整数）
-        default: '5'
+        default: '6'
 
 jobs:
   build:
@@ -61,51 +61,29 @@ jobs:
           done
           echo "版本已设为 $VN ($VC)"
 
-      # 7. 构建；命令可以按需改，例如只编某个模块 :app:assembleDebug
-      - name: Build Release APK
-        run: ./gradlew assembleRelease --no-daemon
+      # 7. 构建 debug APK（自带 debug 签名，可直接安装测试）
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon
 
-      # 8. 签名：Base64 还原成 keystore，再用 apksigner 给 APK 签名。
-      #    未在仓库 Secrets 配置 KEYSTORE_BASE64 时跳过本步，产物为未签名 APK（构建仍成功）。
-      - name: Sign APK (skip if no keystore configured)
-        env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-        run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "未配置签名密钥，产物为未签名 APK"
-            exit 0
-          fi
-          echo "$KEYSTORE_BASE64" | base64 -d > /tmp/app.keystore
-          APK=$(find . -name "*.apk" -path "*/outputs/apk/release/*" | head -1)
-          if [ -z "$APK" ]; then echo "没有找到 APK"; exit 1; fi
-          SIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner | head -1)
-          "$SIGNER" sign --ks /tmp/app.keystore --ks-key-alias "$KEY_ALIAS" \
-            --ks-pass pass:"$KEYSTORE_PASSWORD" --key-pass pass:"$KEY_PASSWORD" \
-            --out "$APK.signed" "$APK"
-          mv "$APK.signed" "$APK"
-
-      # 9. 把产物改成你指定的安装包名称
-      - name: Rename APK
+      # 8. 打包 zip：在产物目录内打包，zip 内直接是 APK 文件，不嵌套目录
+      - name: Package APK into zip
         env:
           NAME: ${{ github.event.inputs.app_name }}
           VN: ${{ github.event.inputs.version_name }}
         run: |
-          APK=$(find . -name "*.apk" -path "*/outputs/apk/release/*" | head -1)
-          if [ -n "$APK" ]; then
-            D=$(dirname "$APK")
-            mv "$APK" "$D/$NAME-$VN.apk"
-            echo "产物: $D/$NAME-$VN.apk"
-          fi
+          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+          if [ -z "$APK" ]; then echo "没有找到 APK"; exit 1; fi
+          cd app/build/outputs/apk/debug
+          ZIP_NAME="$NAME-$VN-debug.zip"
+          zip -j "$ZIP_NAME" "$(basename "$APK")"
+          echo "产物: app/build/outputs/apk/debug/$ZIP_NAME"
+          ls -la
 
-      # 10. 上传产物：构建完后在 App 里点开这条运行记录即可下载、自动安装
-      - name: Upload APK
+      # 9. 上传产物：构建完后在 App 里点开这条运行记录即可下载、自动安装
+      - name: Upload zip
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ github.event.inputs.app_name }}-${{ github.event.inputs.version_name }}
+          name: ${{ github.event.inputs.app_name }}-${{ github.event.inputs.version_name }}-debug
           path: |
-            **/build/outputs/apk/**/*.apk
-            **/build/outputs/bundle/**/*.aab
+            **/build/outputs/apk/debug/*.zip
           if-no-files-found: error

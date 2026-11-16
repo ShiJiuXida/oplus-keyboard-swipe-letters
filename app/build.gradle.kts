@@ -12,8 +12,8 @@ android {
         applicationId = "com.kbswipe.module"
         minSdk = 31
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.5"
     }
 
     buildFeatures { compose = true }
@@ -38,6 +38,7 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2026.06.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.foundation:foundation")
+    implementation("androidx.compose.animation:animation")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("androidx.core:core-ktx:1.16.0")
 }

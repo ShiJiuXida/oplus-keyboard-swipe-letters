@@ -1,6 +1,8 @@
 package com.kbswipe.module
 
 import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
@@ -13,23 +15,31 @@ import java.util.concurrent.atomic.AtomicBoolean
  * （LSPosed 只会把服务 binder 投递给模块自身进程，不会投递给宿主进程）。
  * 配置就绪后直接改写键盘的字母布局映射（见 [SwipePatcher]）；配置变化时
  * 重新应用并结束当前进程，使输入法以新布局重启。
+ *
+ * 功耗策略：
+ * - 只有加载了 preset 布局类的进程才读取远程配置并注册监听，其它进程直接跳过；
+ * - 配置变化的重启做了防抖合并，连续保存只触发一次进程重启。
  */
 class ModuleEntry : XposedModule() {
 
     companion object {
         private const val TAG = "SwipeKeys"
         private const val TARGET_PACKAGE = "com.oplus.keyboard"
+        private const val RESTART_DEBOUNCE_MS = 600L
         private val listenerRegistered = AtomicBoolean(false)
-    }
-
-    override fun onModuleLoaded(param: XposedModuleInterface.ModuleLoadedParam) {
-        log(Log.INFO, TAG, "module loaded in process ${param.processName}")
     }
 
     override fun onPackageReady(param: XposedModuleInterface.PackageReadyParam) {
         if (param.packageName != TARGET_PACKAGE) return
-        log(Log.INFO, TAG, "package ready: ${param.packageName}")
         val classLoader = param.classLoader
+
+        // 输入法有多个进程，只有加载了 preset 布局类的进程才需要工作。
+        if (!SwipePatcher.isPresetPresent(classLoader)) {
+            log(Log.INFO, TAG, "no preset class in this process, skip")
+            return
+        }
+        log(Log.INFO, TAG, "package ready: ${param.packageName}")
+
         val prefs = try {
             getRemotePreferences(Config.PREFS_GROUP)
         } catch (t: Throwable) {
@@ -42,14 +52,19 @@ class ModuleEntry : XposedModule() {
             log(Log.ERROR, TAG, "applyConfig failed", t)
         }
         if (listenerRegistered.compareAndSet(false, true)) {
-            prefs.registerOnSharedPreferenceChangeListener { _, _ ->
-                log(Log.INFO, TAG, "config changed, re-applying and restarting process")
+            val handler = Handler(Looper.getMainLooper())
+            val restart = Runnable {
                 try {
                     applyConfig(classLoader, prefs)
                 } catch (t: Throwable) {
                     log(Log.ERROR, TAG, "re-apply failed", t)
                 }
                 android.os.Process.killProcess(android.os.Process.myPid())
+            }
+            prefs.registerOnSharedPreferenceChangeListener { _, _ ->
+                log(Log.INFO, TAG, "config changed, debounced re-apply and restart")
+                handler.removeCallbacks(restart)
+                handler.postDelayed(restart, RESTART_DEBOUNCE_MS)
             }
         }
     }

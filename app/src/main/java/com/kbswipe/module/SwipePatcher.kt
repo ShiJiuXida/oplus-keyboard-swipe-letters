@@ -13,30 +13,54 @@ import java.lang.reflect.Modifier
  */
 object SwipePatcher {
 
+    private const val PRESET_CLASS_NAME = "com.oplus.keyboard.base.preset.c"
+    private const val KEY_CODE_CLASS_NAME = "com.oplus.keyboard.base.enums.KeyCode"
     private const val LETTER_KEYS = "QWERTYUIOPASDFGHJKLZXCVBNM"
     private const val CN_PROBE_KEYS = "DFGHJKL"
+    private const val LETTER_LAYOUT_COUNT = 3
+
+    /** 进程内是否加载了 preset 布局类（不触发初始化，开销极小）。 */
+    fun isPresetPresent(classLoader: ClassLoader): Boolean =
+        try {
+            Class.forName(PRESET_CLASS_NAME, false, classLoader)
+            true
+        } catch (_: Throwable) {
+            false
+        }
 
     /**
      * 在目标进程中应用映射。cn/en 为 null 时对应模式不做任何修改。
      * 值语义与 [Config.decode] 一致：缺省=默认、空串=禁用。
+     * 返回被改写的布局数；-1 表示该进程未加载 preset/KeyCode 类。
      */
-    fun patch(classLoader: ClassLoader, cn: Map<Char, String>?, en: Map<Char, String>?) {
-        if (cn.isNullOrEmpty() && en.isNullOrEmpty()) return
-        val presetClass = Class.forName("com.oplus.keyboard.base.preset.c", true, classLoader)
-        val keyCodeClass = Class.forName(
-            "com.oplus.keyboard.base.enums.KeyCode", true, classLoader,
-        )
+    fun patch(classLoader: ClassLoader, cn: Map<Char, String>?, en: Map<Char, String>?): Int {
+        val presetClass = try {
+            Class.forName(PRESET_CLASS_NAME, true, classLoader)
+        } catch (_: Throwable) {
+            return -1
+        }
+        val keyCodeClass = try {
+            Class.forName(KEY_CODE_CLASS_NAME, true, classLoader)
+        } catch (_: Throwable) {
+            return -1
+        }
+        if (cn.isNullOrEmpty() && en.isNullOrEmpty()) return 0
+
         @Suppress("UNCHECKED_CAST")
         val keyCodeEnum = keyCodeClass as Class<out Enum<*>>
         val letterEnums = LETTER_KEYS.map { ch -> java.lang.Enum.valueOf(keyCodeEnum, ch.toString()) }
 
         var patchedLayouts = 0
+        var letterLayouts = 0
         for (field in presetClass.declaredFields) {
+            // 字母布局固定为三张（英文/拼音/五笔），找齐后提前结束遍历。
+            if (letterLayouts >= LETTER_LAYOUT_COUNT) break
             if (!Modifier.isStatic(field.modifiers)) continue
             if (!Map::class.java.isAssignableFrom(field.type)) continue
             field.isAccessible = true
             val map = field.get(null) as? Map<*, *> ?: continue
             val entries = collectLetterEntries(map, letterEnums) ?: continue
+            letterLayouts++
             val isCn = entries.any { (_, index) ->
                 val letter = LETTER_KEYS[index]
                 CN_PROBE_KEYS.contains(letter) && hasFullWidth(map[letterEnums[index]])
@@ -55,6 +79,7 @@ object SwipePatcher {
             "SwipeKeys",
             "patched $patchedLayouts letter layouts (cn=${cn?.size ?: 0}, en=${en?.size ?: 0})",
         )
+        return patchedLayouts
     }
 
     private fun hasFullWidth(value: Any?): Boolean {
