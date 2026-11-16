@@ -40,12 +40,9 @@
 
 如果这个模块对你有帮助，欢迎请作者喝杯奶茶 ₍ᐢ..ᐢ₎♡
 
-<table align="center">
-  <tr>
-    <td align="center"><img src="donate/donate_v.png" width="170" alt="赞赏码 V" /></td>
-    <td align="center"><img src="donate/donate_z.png" width="170" alt="赞赏码 Z" /></td>
-  </tr>
-</table>
+<p align="center">
+  <img src="donate/donate_pair.png" width="400" alt="赞赏码" />
+</p>
 
 ## 许可
 
