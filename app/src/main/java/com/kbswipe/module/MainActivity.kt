@@ -3,6 +3,8 @@ package com.kbswipe.module
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -76,6 +78,15 @@ class MainActivity : ComponentActivity() {
 
 private val KEY_ROWS = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
 
+/** 引用过的开源库（二级菜单项）。 */
+private data class ReferenceItem(val name: String, val url: String)
+
+private val REFERENCES = listOf(
+    ReferenceItem("COUI-Kit（界面框架）", "https://github.com/ItosEO/COUI-Kit"),
+    ReferenceItem("libxposed/api（模块 API）", "https://github.com/libxposed/api"),
+    ReferenceItem("libxposed/service（框架服务）", "https://github.com/libxposed/service"),
+)
+
 @Composable
 private fun MainScreen() {
     var service by remember { mutableStateOf<XposedService?>(null) }
@@ -101,11 +112,20 @@ private fun MainScreen() {
 
     var exportText by remember { mutableStateOf<String?>(null) }
     var importOpen by remember { mutableStateOf(false) }
+    var refsExpanded by remember { mutableStateOf(false) }
 
     val colors = CouiPageDefaults.themeColors()
     val accent = colors.accent
     val focusManager = LocalFocusManager.current
     val context = LocalContext.current
+
+    fun openUrl(url: String) {
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        }.onFailure {
+            Toast.makeText(context, "无法打开链接", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     fun saveConfig(showToast: Boolean = true) {
         val prefs = ServiceState.prefs()
@@ -269,6 +289,43 @@ private fun MainScreen() {
                         kind = CouiTextKind.ItemTitle,
                         color = colors.title,
                     )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+
+            Group(title = "引用与开源") {
+                Item(
+                    trailing = {
+                        Text(
+                            text = if (refsExpanded) "收起" else "展开",
+                            kind = CouiTextKind.ItemSummary,
+                            color = colors.accent,
+                        )
+                    },
+                    onClick = { refsExpanded = !refsExpanded },
+                ) {
+                    Text(text = "引用库", kind = CouiTextKind.ItemTitle, color = colors.title)
+                }
+                if (refsExpanded) {
+                    for (reference in REFERENCES) {
+                        Item(
+                            summary = {
+                                Text(
+                                    text = reference.url,
+                                    kind = CouiTextKind.ItemSummary,
+                                    color = colors.summary,
+                                    maxLines = 1,
+                                )
+                            },
+                            onClick = { openUrl(reference.url) },
+                        ) {
+                            Text(
+                                text = reference.name,
+                                kind = CouiTextKind.ItemTitle,
+                                color = colors.title,
+                            )
+                        }
+                    }
                 }
             }
             Spacer(Modifier.height(8.dp))
