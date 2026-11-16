@@ -67,14 +67,17 @@ jobs:
 
       # 8. 签名：Base64 还原成 keystore，再用 apksigner 给 APK 签名。
       #    未在仓库 Secrets 配置 KEYSTORE_BASE64 时跳过本步，产物为未签名 APK（构建仍成功）。
-      - name: Sign APK
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+      - name: Sign APK (skip if no keystore configured)
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "未配置签名密钥，产物为未签名 APK"
+            exit 0
+          fi
           echo "$KEYSTORE_BASE64" | base64 -d > /tmp/app.keystore
           APK=$(find . -name "*.apk" -path "*/outputs/apk/release/*" | head -1)
           if [ -z "$APK" ]; then echo "没有找到 APK"; exit 1; fi
@@ -83,9 +86,6 @@ jobs:
             --ks-pass pass:"$KEYSTORE_PASSWORD" --key-pass pass:"$KEY_PASSWORD" \
             --out "$APK.signed" "$APK"
           mv "$APK.signed" "$APK"
-      - name: Skip signing (no keystore configured)
-        if: ${{ secrets.KEYSTORE_BASE64 == '' }}
-        run: echo "未配置签名密钥，产物为未签名 APK"
 
       # 9. 把产物改成你指定的安装包名称
       - name: Rename APK
