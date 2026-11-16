@@ -13,10 +13,10 @@ on:
         default: '小布26键上滑字母'
       version_name:
         description: 版本号（versionName）
-        default: '1.5'
+        default: '1.0'
       version_code:
         description: 版本代号（versionCode，整数）
-        default: '6'
+        default: '1'
 
 jobs:
   build:

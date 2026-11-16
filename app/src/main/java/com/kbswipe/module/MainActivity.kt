@@ -69,7 +69,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-internal const val VERSION_LABEL = "1.5"
+internal const val VERSION_LABEL = "1.0"
 internal const val TARGET_PACKAGE = "com.oplus.keyboard"
 internal const val PROJECT_URL = "https://github.com/ShiJiuXida/oplus-keyboard-swipe-letters"
 
