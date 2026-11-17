@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.kbswipe.module.hook.ClipboardPatcher
 import com.kbswipe.module.hook.KeySwapPatcher
 import com.kbswipe.module.hook.SwipePatcher
 import io.github.libxposed.api.XposedModule
@@ -16,12 +17,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 宿主进程内的配置读取走框架注入的 XposedInterface.getRemotePreferences()
  * （LSPosed 只会把服务 binder 投递给模块自身进程，不会投递给宿主进程）。
  *
- * 两个补丁：
+ * 三个补丁：
  * - [SwipePatcher]：改写 preset.c 里的字母键上滑符号映射（静态 Map，直接改内容）
  * - [KeySwapPatcher]：Hook 布局工厂，交换底行最左两个功能键
+ * - [ClipboardPatcher]：Hook 布局 inflate，隐藏剪切板 / 常用语顶栏最右侧的设置齿轮（保留编辑键）
  *
  * 功耗策略：
- * - 只有加载了 preset 布局类的进程才读取远程配置并注册监听，其它进程直接跳过；
+ * - 剪切板补丁只在主进程安装；上滑 / 换键补丁只在加载了 preset 布局类的进程工作；
  * - 配置变化的重启做了防抖合并，连续保存只触发一次进程重启。
  */
 class ModuleEntry : XposedModule() {
@@ -32,14 +34,18 @@ class ModuleEntry : XposedModule() {
         private const val RESTART_DEBOUNCE_MS = 600L
         private val listenerRegistered = AtomicBoolean(false)
         private val keySwapInstalled = AtomicBoolean(false)
+        private val clipboardHookInstalled = AtomicBoolean(false)
     }
 
     override fun onPackageReady(param: XposedModuleInterface.PackageReadyParam) {
         if (param.packageName != TARGET_PACKAGE) return
         val classLoader = param.classLoader
 
-        // 输入法有多个进程，只有加载了 preset 布局类的进程才需要工作。
-        if (!SwipePatcher.isPresetPresent(classLoader)) {
+        // 主进程才有剪切板面板；其它进程只有在加载了 preset 布局类时才需要工作。
+        val processName = param.applicationInfo.processName
+        val isMainProcess = processName == null || processName == TARGET_PACKAGE
+        val presetPresent = SwipePatcher.isPresetPresent(classLoader)
+        if (!isMainProcess && !presetPresent) {
             log(Log.INFO, TAG, "no preset class in this process, skip")
             return
         }
@@ -54,7 +60,21 @@ class ModuleEntry : XposedModule() {
             log(Log.INFO, TAG, "module disabled by user, keeping defaults")
             return
         }
-        log(Log.INFO, TAG, "package ready: ${param.packageName}")
+        val hideClipSetting = prefs.getBoolean(
+            Config.KEY_HIDE_CLIP_SETTING,
+            Config.DEFAULT_HIDE_CLIP_SETTING,
+        )
+        log(Log.INFO, TAG, "event=package_ready pkg=${param.packageName}")
+
+        if (isMainProcess) {
+            installClipboardHook(hideClipSetting)
+            registerConfigListener(classLoader, prefs)
+        }
+
+        if (!presetPresent) {
+            log(Log.INFO, TAG, "no preset class in this process, skip")
+            return
+        }
 
         try {
             applyConfig(classLoader, prefs)
@@ -73,6 +93,26 @@ class ModuleEntry : XposedModule() {
         val swapPanel = prefs.getBoolean(Config.KEY_SWAP_PANEL, Config.DEFAULT_SWAP_PANEL)
         if (swapMain || swapPanel) {
             installKeySwap(classLoader, swapMain, swapPanel)
+        }
+    }
+
+    /** 剪切板 / 常用语顶栏功能键：主进程只装一次，关闭开关时不安装 Hook。 */
+    private fun installClipboardHook(enabled: Boolean) {
+        if (!clipboardHookInstalled.compareAndSet(false, true)) return
+        if (!enabled) {
+            log(Log.INFO, TAG, "clipboard hook disabled by user")
+            return
+        }
+        val ok = try {
+            ClipboardPatcher.install(this)
+        } catch (t: Throwable) {
+            log(Log.ERROR, TAG, "clipboard hook failed", t)
+            false
+        }
+        if (ok) {
+            log(Log.INFO, TAG, "event=clipboard_hook_installed")
+        } else {
+            log(Log.WARN, TAG, "clipboard hook unavailable (LayoutInflater.inflate not found)")
         }
     }
 

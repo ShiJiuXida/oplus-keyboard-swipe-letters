@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="module_name">小布键盘助手</string>
-    <string name="module_description">自定义小布输入法（com.oplus.keyboard）：26 键上滑字母、左下角功能键换位</string>
+    <string name="module_description">自定义小布输入法（com.oplus.keyboard）：26 键上滑字母、左下角功能键换位、隐藏剪切板与常用语顶栏设置键</string>
 </resources>

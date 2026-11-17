@@ -18,6 +18,10 @@ object Config {
     const val KEY_SWAP_PANEL = "swap_panel"
     const val DEFAULT_SWAP_PANEL = true
 
+    /** 隐藏剪切板 / 常用语顶栏最右侧的设置齿轮。 */
+    const val KEY_HIDE_CLIP_SETTING = "hide_clip_setting"
+    const val DEFAULT_HIDE_CLIP_SETTING = true
+
     /** 键盘字母键顺序（qwerty 三行拼接）。 */
     const val LETTERS = "qwertyuiopasdfghjklzxcvbnm"
 

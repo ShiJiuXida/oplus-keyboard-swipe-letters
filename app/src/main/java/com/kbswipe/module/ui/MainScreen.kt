@@ -79,6 +79,7 @@ internal fun MainScreen() {
     var enabled by rememberSaveable { mutableStateOf(true) }
     var swapMain by rememberSaveable { mutableStateOf(Config.DEFAULT_SWAP_MAIN) }
     var swapPanel by rememberSaveable { mutableStateOf(Config.DEFAULT_SWAP_PANEL) }
+    var hideClipSetting by rememberSaveable { mutableStateOf(Config.DEFAULT_HIDE_CLIP_SETTING) }
     var cnValues by remember { mutableStateOf<Map<Char, String?>>(emptyMap()) }
     var enValues by remember { mutableStateOf<Map<Char, String?>>(emptyMap()) }
     var loaded by remember { mutableStateOf(false) }
@@ -93,6 +94,7 @@ internal fun MainScreen() {
         enabled = prefs.getBoolean(Config.KEY_ENABLED, true)
         swapMain = prefs.getBoolean(Config.KEY_SWAP_MAIN, Config.DEFAULT_SWAP_MAIN)
         swapPanel = prefs.getBoolean(Config.KEY_SWAP_PANEL, Config.DEFAULT_SWAP_PANEL)
+        hideClipSetting = prefs.getBoolean(Config.KEY_HIDE_CLIP_SETTING, Config.DEFAULT_HIDE_CLIP_SETTING)
         cnValues = Config.decode(prefs.getString(Config.KEY_MAP_CN, null)).mapValues { (_, v) -> v }
         enValues = Config.decode(prefs.getString(Config.KEY_MAP_EN, null)).mapValues { (_, v) -> v }
         loaded = true
@@ -126,6 +128,7 @@ internal fun MainScreen() {
             .putBoolean(Config.KEY_ENABLED, enabled)
             .putBoolean(Config.KEY_SWAP_MAIN, swapMain)
             .putBoolean(Config.KEY_SWAP_PANEL, swapPanel)
+            .putBoolean(Config.KEY_HIDE_CLIP_SETTING, hideClipSetting)
             .putString(Config.KEY_MAP_CN, Config.encode(cnValues))
             .putString(Config.KEY_MAP_EN, Config.encode(enValues))
             .apply()
@@ -284,6 +287,12 @@ internal fun MainScreen() {
                                 saveConfig(showToast = false)
                                 toast("已保存，输入法将自动重启生效")
                             },
+                            hideClipSetting = hideClipSetting,
+                            onHideClipSettingChange = { value ->
+                                hideClipSetting = value
+                                saveConfig(showToast = false)
+                                toast("已保存，输入法将自动重启生效")
+                            },
                             onExport = { exportConfigLauncher.launch("小布26键上滑配置.json") },
                             onImport = {
                                 importConfigLauncher.launch(
@@ -426,6 +435,8 @@ private fun MoreTabContent(
     onSwapMainChange: (Boolean) -> Unit,
     swapPanel: Boolean,
     onSwapPanelChange: (Boolean) -> Unit,
+    hideClipSetting: Boolean,
+    onHideClipSettingChange: (Boolean) -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
     accent: Color,
@@ -519,6 +530,33 @@ private fun MoreTabContent(
             }
             BasicText(
                 text = "点进符号面板 返回 ⇄ 123；点进 123 面板 符号 ⇄ 返回",
+                style = TextStyle(color = colors.summary, fontSize = 11.sp),
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .height(1.dp)
+                .background(colors.divider),
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BasicText(
+                    text = "隐藏剪切板设置键",
+                    style = TextStyle(color = colors.title, fontSize = 15.sp),
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = hideClipSetting, onCheckedChange = onHideClipSettingChange)
+            }
+            BasicText(
+                text = "剪切板 / 常用语顶栏最右侧的设置齿轮不显示，编辑键保留",
                 style = TextStyle(color = colors.summary, fontSize = 11.sp),
                 modifier = Modifier.padding(top = 2.dp),
             )

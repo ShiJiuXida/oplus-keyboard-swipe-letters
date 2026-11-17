@@ -19,8 +19,8 @@ android {
         applicationId = "com.kbswipe.module"
         minSdk = 31
         targetSdk = 35
-        versionCode = 10
-        versionName = "1.9"
+        versionCode = 13
+        versionName = "1.12"
     }
 
     buildFeatures { compose = true }

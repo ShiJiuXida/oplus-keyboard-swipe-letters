@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-internal const val VERSION_LABEL = "1.9"
+internal const val VERSION_LABEL = "1.12"
 internal const val TARGET_PACKAGE = "com.oplus.keyboard"
 internal const val PROJECT_URL = "https://github.com/ShiJiuXida/oplus-keyboard-swipe-letters"
 
@@ -587,7 +587,7 @@ internal fun AboutDialog(
                             ),
                         )
                         BasicText(
-                            text = "功能：26 键上滑字母自定义；左下角功能键换位（主键盘 符号 ⇄ 123，符号/数字面板 返回/符号 ⇄ 123）。",
+                            text = "功能：26 键上滑字母自定义；左下角功能键换位（主键盘 符号 ⇄ 123，符号/数字面板 返回/符号 ⇄ 123）；隐藏剪切板 / 常用语顶栏最右侧的设置齿轮（保留编辑键，可在功能开关中关闭）。",
                             style = TextStyle(color = colors.summary, fontSize = 13.sp),
                             modifier = Modifier.padding(top = 6.dp),
                         )
