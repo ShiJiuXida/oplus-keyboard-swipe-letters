@@ -1,17 +1,25 @@
 package com.kbswipe.module.hook
 
 import io.github.libxposed.api.XposedInterface
+import java.lang.reflect.Constructor
 import java.lang.reflect.Modifier
 
 /**
  * 左下角功能键互换：把每个键盘底行最左边的两个功能键交换位置。
  *
- * 宿主把键盘布局放在 raw JSON 里，由 `com.oplus.keyboard.base.util.c.u(int)` 解析成
+ * 宿主把键盘布局放在 raw JSON 里，由工厂方法解析成
  * `com.oplus.keyboard.base.preset.d`（rowsInfo = ArrayList<Pair<行参数, ArrayList<preset.a>>>）。
- * 在该工厂方法返回后改写底行 ArrayList 的元素顺序，即可实现：
+ * 改写底行 ArrayList 的元素顺序即可实现：
  * - 主键盘（子开关 1）：[符号][123] → [123][符号]
  * - 符号面板（子开关 2）：[返回][123] → [123][返回]
  * - 数字面板（子开关 2）：[符号][返回] → [返回][符号]
+ *
+ * 跨版本策略（宿主 1.9.18 → 1.9.25 的工厂方法从 `util.c.u(int)` 变成了 `util.c.v(int)`）：
+ * 1. **首选 hook 设计对象的构造器**：不论工厂方法叫什么，布局对象一定经过
+ *    `preset.d` 的构造器，且在构造完成后字段已就绪，改完即被 Lazy 缓存持有；
+ * 2. 构造器不可用时，退回「按签名扫描工厂方法」：(int) → preset.d 的静态方法，
+ *    新旧版的 u / v 都能命中；
+ * 3. 两条都拿不到就放弃，绝不硬编码某一版的混淆名。
  *
  * 字段名是混淆产物：这里全部按「运行时值的类型」定位（ArrayList / KeyCode 枚举），
  * 不依赖 a/b/c 这类字段名，也不依赖泛型签名（Pair 的字段擦除后都是 Object）。
@@ -21,8 +29,14 @@ object KeySwapPatcher {
     private const val DESIGN_CLASS = "com.oplus.keyboard.base.preset.d"
     private const val KEY_CLASS = "com.oplus.keyboard.base.preset.a"
     private const val KEYCODE_CLASS = "com.oplus.keyboard.base.enums.KeyCode"
-    private const val FACTORY_CLASS = "com.oplus.keyboard.base.util.c"
-    private const val FACTORY_METHOD = "u"
+
+    /** 工厂方法的候选宿主类：旧版在 util.c，部分布局在 preset.h / b / e 里自带同名工厂。 */
+    private val FACTORY_CLASSES = arrayOf(
+        "com.oplus.keyboard.base.util.c",
+        "com.oplus.keyboard.base.preset.h",
+        "com.oplus.keyboard.base.preset.b",
+        "com.oplus.keyboard.base.preset.e",
+    )
 
     /**
      * preset.a 构造器参数里属于「身份/样式」的下标：
@@ -31,7 +45,7 @@ object KeySwapPatcher {
      */
     private val IDENTITY_INDEXES = setOf(0, 7, 8, 9, 10, 11)
 
-    /** 安装布局工厂 Hook，返回是否安装成功。 */
+    /** 安装布局改写 Hook，返回是否安装成功；[onDesignReady] 用于把结果回调给入口做日志。 */
     fun install(
         module: XposedInterface,
         classLoader: ClassLoader,
@@ -39,28 +53,95 @@ object KeySwapPatcher {
         swapPanel: Boolean,
     ): Boolean {
         if (!swapMain && !swapPanel) return false
-        val factory = try {
-            Class.forName(FACTORY_CLASS, false, classLoader)
+
+        val designClass = try {
+            Class.forName(DESIGN_CLASS, false, classLoader)
         } catch (_: Throwable) {
             return false
         }
-        val method = try {
-            factory.getDeclaredMethod(FACTORY_METHOD, Int::class.javaPrimitiveType).apply {
-                isAccessible = true
-            }
+
+        // 两条路都装：构造器 hook 覆盖「所有布局共用同一工厂」的情况，
+        // 工厂 hook 覆盖「拿不到构造器 this」的极端情况；改写本身幂等，重复触发无副作用。
+        val byCtor = runCatching { hookConstructors(module, designClass, swapMain, swapPanel) }
+            .getOrDefault(false)
+        val byFactory = runCatching { hookFactory(module, classLoader, swapMain, swapPanel) }
+            .getOrDefault(false)
+        return byCtor || byFactory
+    }
+
+    /** 优先方案：hook 设计对象构造器，构造完成后改写底行。 */
+    private fun hookConstructors(
+        module: XposedInterface,
+        designClass: Class<*>,
+        swapMain: Boolean,
+        swapPanel: Boolean,
+    ): Boolean {
+        val constructors: List<Constructor<*>> = try {
+            designClass.declaredConstructors.toList()
         } catch (_: Throwable) {
             return false
         }
-        module.hook(method).intercept { chain ->
-            val design = chain.proceed()
+        var hooked = 0
+        for (ctor in constructors) {
             try {
-                patchDesign(design, swapMain, swapPanel)
+                ctor.isAccessible = true
+                module.hook(ctor).intercept { chain ->
+                    val result = chain.proceed()
+                    try {
+                        patchDesign(chain.thisObject ?: result, swapMain, swapPanel)
+                    } catch (_: Throwable) {
+                        // 结构变化不应影响宿主，静默跳过
+                    }
+                    result
+                }
+                hooked++
             } catch (_: Throwable) {
-                // 结构变化不应影响宿主，静默跳过
+                // 单个构造器失败不影响其它
             }
-            design
         }
-        return true
+        return hooked > 0
+    }
+
+    /** 备选方案：扫描 (int) → preset.d 的静态工厂方法（旧版 u、新版 v 都符合）。 */
+    private fun hookFactory(
+        module: XposedInterface,
+        classLoader: ClassLoader,
+        swapMain: Boolean,
+        swapPanel: Boolean,
+    ): Boolean {
+        for (className in FACTORY_CLASSES) {
+            val cls = try {
+                Class.forName(className, false, classLoader)
+            } catch (_: Throwable) {
+                continue
+            }
+            val method = try {
+                cls.declaredMethods.firstOrNull {
+                    Modifier.isStatic(it.modifiers) &&
+                        it.parameterCount == 1 &&
+                        it.parameterTypes[0] == Int::class.javaPrimitiveType &&
+                        it.returnType.name == DESIGN_CLASS
+                }
+            } catch (_: Throwable) {
+                null
+            } ?: continue
+            try {
+                method.isAccessible = true
+                module.hook(method).intercept { chain ->
+                    val design = chain.proceed()
+                    try {
+                        patchDesign(design, swapMain, swapPanel)
+                    } catch (_: Throwable) {
+                        // 同上
+                    }
+                    design
+                }
+                return true
+            } catch (_: Throwable) {
+                // 换下一个候选类
+            }
+        }
+        return false
     }
 
     /**
@@ -148,7 +229,7 @@ object KeySwapPatcher {
 
     /** own 提供几何值，other 提供身份值。 */
     private fun rebuild(
-        ctor: java.lang.reflect.Constructor<*>,
+        ctor: Constructor<*>,
         fields: List<java.lang.reflect.Field>,
         own: Any,
         other: Any,

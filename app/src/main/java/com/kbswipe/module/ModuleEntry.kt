@@ -6,6 +6,7 @@ import android.os.Looper
 import android.util.Log
 import com.kbswipe.module.hook.ClipboardPatcher
 import com.kbswipe.module.hook.KeySwapPatcher
+import com.kbswipe.module.hook.MarkColorPatcher
 import com.kbswipe.module.hook.SwipePatcher
 import io.github.libxposed.api.XposedModule
 import io.github.libxposed.api.XposedModuleInterface
@@ -17,13 +18,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  * 宿主进程内的配置读取走框架注入的 XposedInterface.getRemotePreferences()
  * （LSPosed 只会把服务 binder 投递给模块自身进程，不会投递给宿主进程）。
  *
- * 三个补丁：
+ * 四个补丁：
  * - [SwipePatcher]：改写 preset.c 里的字母键上滑符号映射（静态 Map，直接改内容）
- * - [KeySwapPatcher]：Hook 布局工厂，交换底行最左两个功能键
- * - [ClipboardPatcher]：Hook 布局 inflate，隐藏剪切板 / 常用语顶栏最右侧的设置齿轮（保留编辑键）
+ * - [KeySwapPatcher]：改写布局设计的底行键序（构造器 + 工厂双路，跨版本）
+ * - [MarkColorPatcher]：改写 KeySkin.getMarkColor()，替换键帽角标颜色
+ * - [ClipboardPatcher]：Hook 布局 inflate，隐藏剪切板 / 常用语顶栏最右侧的设置齿轮
  *
  * 功耗策略：
- * - 剪切板补丁只在主进程安装；上滑 / 换键补丁只在加载了 preset 布局类的进程工作；
+ * - 剪切板补丁只在主进程安装；上滑 / 换键 / 角标色补丁只在加载了 preset 布局类的进程工作；
  * - 配置变化的重启做了防抖合并，连续保存只触发一次进程重启。
  */
 class ModuleEntry : XposedModule() {
@@ -35,6 +37,7 @@ class ModuleEntry : XposedModule() {
         private val listenerRegistered = AtomicBoolean(false)
         private val keySwapInstalled = AtomicBoolean(false)
         private val clipboardHookInstalled = AtomicBoolean(false)
+        private val markColorInstalled = AtomicBoolean(false)
     }
 
     override fun onPackageReady(param: XposedModuleInterface.PackageReadyParam) {
@@ -94,6 +97,22 @@ class ModuleEntry : XposedModule() {
         if (swapMain || swapPanel) {
             installKeySwap(classLoader, swapMain, swapPanel)
         }
+
+        installMarkColor(
+            classLoader,
+            enabled = prefs.getBoolean(Config.KEY_MARK_COLOR_ENABLED, Config.DEFAULT_MARK_COLOR_ENABLED),
+            light = readMarkColor(prefs, Config.KEY_MARK_COLOR_LIGHT, Config.DEFAULT_MARK_COLOR_LIGHT),
+            dark = readMarkColor(prefs, Config.KEY_MARK_COLOR_DARK, Config.DEFAULT_MARK_COLOR_DARK),
+        )
+    }
+
+    /** 读角标色；v1.13 只写过单色 [Config.KEY_MARK_COLOR_LEGACY]，首次升级时迁移到两套。 */
+    private fun readMarkColor(prefs: SharedPreferences, key: String, fallback: Int): Int {
+        if (prefs.contains(key)) return prefs.getInt(key, fallback)
+        if (prefs.contains(Config.KEY_MARK_COLOR_LEGACY)) {
+            return prefs.getInt(Config.KEY_MARK_COLOR_LEGACY, fallback)
+        }
+        return fallback
     }
 
     /** 剪切板 / 常用语顶栏功能键：主进程只装一次，关闭开关时不安装 Hook。 */
@@ -116,7 +135,7 @@ class ModuleEntry : XposedModule() {
         }
     }
 
-    /** 左下角功能键互换：布局工厂 Hook 每个进程只装一次。 */
+    /** 左下角功能键互换：每个进程只装一次，之后靠开关在拦截器里即时生效。 */
     private fun installKeySwap(classLoader: ClassLoader, swapMain: Boolean, swapPanel: Boolean) {
         if (!keySwapInstalled.compareAndSet(false, true)) return
         val ok = try {
@@ -129,7 +148,31 @@ class ModuleEntry : XposedModule() {
             Log.INFO,
             TAG,
             if (ok) "keyswap hook installed (main=$swapMain, panel=$swapPanel)"
-            else "keyswap hook unavailable (layout factory not found)",
+            else "keyswap hook unavailable (layout design class not found)",
+        )
+    }
+
+    /** 键帽角标颜色：Hook 只装一次，日夜两色与开关通过对象字段热更新。 */
+    private fun installMarkColor(classLoader: ClassLoader, enabled: Boolean, light: Int, dark: Int) {
+        MarkColorPatcher.enabled = enabled
+        MarkColorPatcher.lightColor = light
+        MarkColorPatcher.darkColor = dark
+        if (!markColorInstalled.compareAndSet(false, true)) return
+        val hooks = try {
+            MarkColorPatcher.install(this, classLoader, light, dark)
+        } catch (t: Throwable) {
+            log(Log.ERROR, TAG, "mark color hook failed", t)
+            0
+        }
+        log(
+            Log.INFO,
+            TAG,
+            if (hooks > 0) {
+                "mark color hook installed (hooks=$hooks, enabled=$enabled, " +
+                    "light=#${Integer.toHexString(light)}, dark=#${Integer.toHexString(dark)})"
+            } else {
+                "mark color hook unavailable (theme color reader not found)"
+            },
         )
     }
 

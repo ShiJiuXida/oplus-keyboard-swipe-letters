@@ -14,6 +14,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -25,6 +26,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.WindowInsets
@@ -80,6 +82,11 @@ internal fun MainScreen() {
     var swapMain by rememberSaveable { mutableStateOf(Config.DEFAULT_SWAP_MAIN) }
     var swapPanel by rememberSaveable { mutableStateOf(Config.DEFAULT_SWAP_PANEL) }
     var hideClipSetting by rememberSaveable { mutableStateOf(Config.DEFAULT_HIDE_CLIP_SETTING) }
+    var markColorEnabled by rememberSaveable { mutableStateOf(Config.DEFAULT_MARK_COLOR_ENABLED) }
+    var markLight by rememberSaveable { mutableStateOf(Config.DEFAULT_MARK_COLOR_LIGHT) }
+    var markDark by rememberSaveable { mutableStateOf(Config.DEFAULT_MARK_COLOR_DARK) }
+    /** null=未打开；true=编辑白天色；false=编辑黑夜色。 */
+    var colorPickerForLight by remember { mutableStateOf<Boolean?>(null) }
     var cnValues by remember { mutableStateOf<Map<Char, String?>>(emptyMap()) }
     var enValues by remember { mutableStateOf<Map<Char, String?>>(emptyMap()) }
     var loaded by remember { mutableStateOf(false) }
@@ -95,6 +102,18 @@ internal fun MainScreen() {
         swapMain = prefs.getBoolean(Config.KEY_SWAP_MAIN, Config.DEFAULT_SWAP_MAIN)
         swapPanel = prefs.getBoolean(Config.KEY_SWAP_PANEL, Config.DEFAULT_SWAP_PANEL)
         hideClipSetting = prefs.getBoolean(Config.KEY_HIDE_CLIP_SETTING, Config.DEFAULT_HIDE_CLIP_SETTING)
+        markColorEnabled = prefs.getBoolean(
+            Config.KEY_MARK_COLOR_ENABLED,
+            Config.DEFAULT_MARK_COLOR_ENABLED,
+        )
+        // 单色（v1.13）配置迁移
+        val legacy = if (prefs.contains(Config.KEY_MARK_COLOR_LEGACY)) {
+            prefs.getInt(Config.KEY_MARK_COLOR_LEGACY, Config.DEFAULT_MARK_COLOR_LIGHT)
+        } else {
+            null
+        }
+        markLight = prefs.getInt(Config.KEY_MARK_COLOR_LIGHT, legacy ?: Config.DEFAULT_MARK_COLOR_LIGHT)
+        markDark = prefs.getInt(Config.KEY_MARK_COLOR_DARK, legacy ?: Config.DEFAULT_MARK_COLOR_DARK)
         cnValues = Config.decode(prefs.getString(Config.KEY_MAP_CN, null)).mapValues { (_, v) -> v }
         enValues = Config.decode(prefs.getString(Config.KEY_MAP_EN, null)).mapValues { (_, v) -> v }
         loaded = true
@@ -129,6 +148,9 @@ internal fun MainScreen() {
             .putBoolean(Config.KEY_SWAP_MAIN, swapMain)
             .putBoolean(Config.KEY_SWAP_PANEL, swapPanel)
             .putBoolean(Config.KEY_HIDE_CLIP_SETTING, hideClipSetting)
+            .putBoolean(Config.KEY_MARK_COLOR_ENABLED, markColorEnabled)
+            .putInt(Config.KEY_MARK_COLOR_LIGHT, markLight)
+            .putInt(Config.KEY_MARK_COLOR_DARK, markDark)
             .putString(Config.KEY_MAP_CN, Config.encode(cnValues))
             .putString(Config.KEY_MAP_EN, Config.encode(enValues))
             .apply()
@@ -141,7 +163,21 @@ internal fun MainScreen() {
     ) { uri ->
         if (uri != null) {
             scope.launch {
-                val ok = writeTextToUri(context, uri, Config.exportJson(enabled, cnValues, enValues))
+                val ok = writeTextToUri(
+                    context,
+                    uri,
+                    Config.exportJson(
+                        enabled = enabled,
+                        cn = cnValues,
+                        en = enValues,
+                        swapMain = swapMain,
+                        swapPanel = swapPanel,
+                        hideClipSetting = hideClipSetting,
+                        markColorEnabled = markColorEnabled,
+                        markColorLight = markLight,
+                        markColorDark = markDark,
+                    ),
+                )
                 toast(if (ok) "配置已导出" else "导出失败")
             }
         }
@@ -158,6 +194,13 @@ internal fun MainScreen() {
                     enabled = data.enabled
                     cnValues = data.cn
                     enValues = data.en
+                    // 旧版配置没有这些字段：null 表示文件没提供，保持界面当前值
+                    data.swapMain?.let { swapMain = it }
+                    data.swapPanel?.let { swapPanel = it }
+                    data.hideClipSetting?.let { hideClipSetting = it }
+                    data.markColorEnabled?.let { markColorEnabled = it }
+                    data.markColorLight?.let { markLight = it }
+                    data.markColorDark?.let { markDark = it }
                     saveConfig(showToast = false)
                     toast("导入成功，输入法将自动重启生效")
                 }
@@ -293,11 +336,20 @@ internal fun MainScreen() {
                                 saveConfig(showToast = false)
                                 toast("已保存，输入法将自动重启生效")
                             },
+                            markColorEnabled = markColorEnabled,
+                            onMarkColorEnabledChange = { value ->
+                                markColorEnabled = value
+                                saveConfig(showToast = false)
+                                toast("已保存，输入法将自动重启生效")
+                            },
+                            markColorLight = markLight,
+                            markColorDark = markDark,
+                            onPickMarkColor = { forLight -> colorPickerForLight = forLight },
                             onExport = { exportConfigLauncher.launch("小布26键上滑配置.json") },
                             onImport = {
-                                importConfigLauncher.launch(
-                                    arrayOf("application/json", "text/plain", "application/octet-stream"),
-                                )
+                                // 不按 MIME 过滤：各家文件管理器对 .json 的 MIME 上报不一致，
+                                // 过滤会导致旧版配置文件在文件选择器里变灰、根本选不中
+                                importConfigLauncher.launch(arrayOf("*/*"))
                             },
                             accent = accent,
                             colors = colors,
@@ -382,6 +434,23 @@ internal fun MainScreen() {
             onDismiss = { aboutOpen = false },
         )
     }
+
+    colorPickerForLight?.let { forLight ->
+        MarkColorDialog(
+            current = if (forLight) markLight else markDark,
+            title = if (forLight) "白天角标色" else "黑夜角标色",
+            accent = accent,
+            colors = colors,
+            onApply = { picked ->
+                if (forLight) markLight = picked else markDark = picked
+                markColorEnabled = true
+                colorPickerForLight = null
+                saveConfig(showToast = false)
+                toast("已保存，输入法将自动重启生效")
+            },
+            onDismiss = { colorPickerForLight = null },
+        )
+    }
 }
 
 @Composable
@@ -437,6 +506,12 @@ private fun MoreTabContent(
     onSwapPanelChange: (Boolean) -> Unit,
     hideClipSetting: Boolean,
     onHideClipSettingChange: (Boolean) -> Unit,
+    markColorEnabled: Boolean,
+    onMarkColorEnabledChange: (Boolean) -> Unit,
+    markColorLight: Int,
+    markColorDark: Int,
+    /** true=挑白天色，false=挑黑夜色。 */
+    onPickMarkColor: (Boolean) -> Unit,
     onExport: () -> Unit,
     onImport: () -> Unit,
     accent: Color,
@@ -561,6 +636,45 @@ private fun MoreTabContent(
                 modifier = Modifier.padding(top = 2.dp),
             )
         }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .height(1.dp)
+                .background(colors.divider),
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .padding(horizontal = 16.dp, vertical = 10.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BasicText(
+                    text = "替换上滑字符颜色",
+                    style = TextStyle(color = colors.title, fontSize = 15.sp),
+                    modifier = Modifier.weight(1f),
+                )
+                Switch(checked = markColorEnabled, onCheckedChange = onMarkColorEnabledChange)
+            }
+            BasicText(
+                text = "键帽右上角的上滑符号改用自定义颜色，白天 / 黑夜两套自动跟随主题切换",
+                style = TextStyle(color = colors.summary, fontSize = 11.sp),
+                modifier = Modifier.padding(top = 2.dp),
+            )
+            MarkColorRow(
+                label = "白天角标色",
+                color = markColorLight,
+                colors = colors,
+                onClick = { onPickMarkColor(true) },
+            )
+            MarkColorRow(
+                label = "黑夜角标色",
+                color = markColorDark,
+                colors = colors,
+                onClick = { onPickMarkColor(false) },
+            )
+        }
     }
 
     SettingsCard(title = "数据管理", subtitle = null, colors = colors) {
@@ -578,5 +692,45 @@ private fun MoreTabContent(
                 onClick = onImport,
             )
         }
+    }
+}
+
+/** 一行「标签 + 色块 + HEX」，点任意位置都能取色。 */
+@Composable
+private fun MarkColorRow(
+    label: String,
+    color: Int,
+    colors: com.itos.coui.layout.CouiPageColors,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BasicText(
+            text = label,
+            style = TextStyle(color = colors.title, fontSize = 13.sp),
+            modifier = Modifier.weight(1f),
+        )
+        BasicText(
+            text = Config.colorToHex(color).removePrefix("#").takeLast(6),
+            style = TextStyle(color = colors.summary, fontSize = 11.sp),
+        )
+        Spacer(Modifier.width(8.dp))
+        Box(
+            modifier = Modifier
+                .size(26.dp)
+                .clip(RoundedCornerShape(7.dp))
+                .background(Color(color))
+                .border(1.dp, colors.divider, RoundedCornerShape(7.dp)),
+        )
     }
 }

@@ -19,8 +19,8 @@ android {
         applicationId = "com.kbswipe.module"
         minSdk = 31
         targetSdk = 35
-        versionCode = 13
-        versionName = "1.12"
+        versionCode = 14
+        versionName = "1.13"
     }
 
     buildFeatures { compose = true }
@@ -39,7 +39,13 @@ android {
 
     buildTypes {
         getByName("release") {
+            // 配了正式 keystore 就用它；没配时回退到 debug 签名，
+            // 保证 clone 下来直接能出可安装的正式包（自用模块的常规做法）。
             signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles("proguard-rules.pro")
         }
     }
 
